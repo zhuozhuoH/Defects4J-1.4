@@ -15,8 +15,6 @@ if ! wget --version > /dev/null 2>&1; then
     exit 1
 fi
 
-HOST_URL="http://people.cs.umass.edu/~rjust/defects4j/download"
-
 # Directories for project repositories and external libraries
 BASE="$(cd $(dirname $0); pwd)"
 DIR_REPOS="$BASE/project_repos"
@@ -24,6 +22,7 @@ DIR_LIB_GEN="$BASE/framework/lib/test_generation/generation"
 DIR_LIB_RT="$BASE/framework/lib/test_generation/runtime"
 DIR_LIB_GRADLE="$BASE/framework/lib/build_systems/gradle"
 mkdir -p "$DIR_LIB_GEN" && mkdir -p "$DIR_LIB_RT" && mkdir -p "$DIR_LIB_GRADLE"
+
 
 ################################################################################
 #
@@ -53,6 +52,7 @@ get_modification_timestamp() {
     echo "$ts"
 }
 
+
 ################################################################################
 #
 # Download project repositories if necessary
@@ -66,8 +66,8 @@ cd "$DIR_REPOS" && ./get_repos.sh
 #
 echo
 echo "Setting up Major ... "
-MAJOR_VERSION="1.3.4"
-MAJOR_URL="http://mutation-testing.org/downloads"
+MAJOR_VERSION="1.3.2"
+MAJOR_URL="https://mutation-testing.org/downloads"
 MAJOR_ZIP="major-${MAJOR_VERSION}_jre7.zip"
 cd "$BASE" && wget -nv -N "$MAJOR_URL/$MAJOR_ZIP" \
            && unzip -o "$MAJOR_ZIP" > /dev/null \
@@ -81,15 +81,17 @@ cd "$BASE" && wget -nv -N "$MAJOR_URL/$MAJOR_ZIP" \
 echo
 echo "Setting up EvoSuite ... "
 EVOSUITE_VERSION="0.2.0"
+# EVOSUITE_URL="http://people.cs.umass.edu/~rjust/defects4j/download"
+EVOSUITE_URL="http://www.evosuite.org/files"
 EVOSUITE_JAR="evosuite-${EVOSUITE_VERSION}.jar"
 EVOSUITE_RT_JAR="evosuite-standalone-runtime-${EVOSUITE_VERSION}.jar"
 cd "$DIR_LIB_GEN" && [ ! -f "$EVOSUITE_JAR" ] \
-                  && wget -nv "$HOST_URL/$EVOSUITE_JAR"
+                  && wget -nv "$EVOSUITE_URL/$EVOSUITE_JAR"
 cd "$DIR_LIB_RT"  && [ ! -f "$EVOSUITE_RT_JAR" ] \
-                  && wget -nv "$HOST_URL/$EVOSUITE_RT_JAR"
+                  && wget -nv "$EVOSUITE_URL/$EVOSUITE_RT_JAR"
 # Set symlinks for the supported version of EvoSuite
-(cd "$DIR_LIB_GEN" && ln -sf "$EVOSUITE_JAR" "evosuite-current.jar")
-(cd "$DIR_LIB_RT" && ln -sf "$EVOSUITE_RT_JAR" "evosuite-rt.jar")
+ln -sf "$DIR_LIB_GEN/$EVOSUITE_JAR" "$DIR_LIB_GEN/evosuite-current.jar"
+ln -sf "$DIR_LIB_RT/$EVOSUITE_RT_JAR" "$DIR_LIB_RT/evosuite-rt.jar"
 
 ################################################################################
 #
@@ -97,18 +99,14 @@ cd "$DIR_LIB_RT"  && [ ! -f "$EVOSUITE_RT_JAR" ] \
 #
 echo
 echo "Setting up Randoop ... "
-RANDOOP_VERSION="4.0.4"
+RANDOOP_VERSION="3.1.5"
 RANDOOP_URL="https://github.com/randoop/randoop/releases/download/v${RANDOOP_VERSION}"
 RANDOOP_JAR="randoop-all-${RANDOOP_VERSION}.jar"
-REPLACECALL_JAR="replacecall-${RANDOOP_VERSION}.jar"
 cd "$DIR_LIB_GEN" && [ ! -f "$RANDOOP_JAR" ] \
                   && wget -nv "$RANDOOP_URL/$RANDOOP_JAR"
-cd "$DIR_LIB_GEN" && [ ! -f "$REPLACECALL_JAR" ] \
-                  && wget -nv "$RANDOOP_URL/$REPLACECALL_JAR"
 # Set symlink for the supported version of Randoop
-(cd "$DIR_LIB_GEN" && ln -sf "$RANDOOP_JAR" "randoop-current.jar")
-(cd "$DIR_LIB_GEN" && ln -sf "$REPLACECALL_JAR" "replacecall-current.jar")
-(cd "$DIR_LIB_GEN" && jar -xf "$REPLACECALL_JAR" "default-replacements.txt")
+ln -sf "$DIR_LIB_GEN/$RANDOOP_JAR" "$DIR_LIB_GEN/randoop-current.jar"
+
 
 ################################################################################
 #
@@ -133,8 +131,8 @@ if [ -e $GRADLE_DEPS_ZIP ]; then
 fi
 
 # Only download archive if the server has a newer file
-wget -N $HOST_URL/$GRADLE_DISTS_ZIP
-wget -N $HOST_URL/$GRADLE_DEPS_ZIP
+wget -N https://defects4j.org/downloads/$GRADLE_DISTS_ZIP
+wget -N https://defects4j.org/downloads/$GRADLE_DEPS_ZIP
 new_dists_ts=$(get_modification_timestamp $GRADLE_DISTS_ZIP)
 new_deps_ts=$(get_modification_timestamp $GRADLE_DEPS_ZIP)
 
