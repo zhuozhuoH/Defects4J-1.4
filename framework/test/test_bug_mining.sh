@@ -5,6 +5,8 @@
 #
 ################################################################################
 
+set -e
+
 HERE=$(cd `dirname $0` && pwd)
 
 # Import helper subroutines and variables, and init Defects4J
@@ -36,6 +38,23 @@ _check_output() {
     fi
 
     rm -f "$actual.sorted" "$expected.sorted"
+}
+
+# MacOS does not install the timeout command by default.
+if [ "$(uname)" = "Darwin" ] ; then
+  function timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+fi
+
+# Download the remote resource to a local file of the same name, if the
+# remote resource is newer.  Works around connections that hang.  Takes a
+# single command-line argument, a URL.
+download_url() {
+    BASENAME=`basename ${@: -1}`
+    if [ "$(uname)" = "Darwin" ] ; then
+        wget -nv -N "$@"
+    else
+	timeout 300 curl -s -S -R -L -O -z "$BASENAME" "$@" || (echo "retrying curl $@" && rm -f "$BASENAME" && curl -R -L -O -z "$BASENAME" "$@")
+    fi
 }
 
 #
@@ -72,7 +91,8 @@ test_create_project() {
     [ -s "$work_dir/$project_perl_module" ] || die "Project Perl module does not exist or it is empty"
     [ -s "$work_dir/$project_build_patch" ] || die "build.xml.patch does not exist or it is empty"
     [ -s "$work_dir/$project_build_xml" ] || die "Project build file does not exist or it is empty"
-    [ -f "$work_dir/framework/projects/$project_id/commit-db" ] || die "commit-db does not exist"
+    [ -f "$work_dir/framework/projects/$project_id/$BUGS_CSV_ACTIVE" ] || die "active-bugs csv does not exist"
+    [ -f "$work_dir/framework/projects/$project_id/$BUGS_CSV_DEPRECATED" ] || die "deprecated-bugs csv does not exist"
     [ -s "$work_dir/project_repos/README" ] || die "README file in $work_dir/project_repos does not exist or it is empty"
 
     # Check whether content of expected files is correct
@@ -117,7 +137,7 @@ test_crossref_commmit_issue() {
     local git_log_file="$work_dir/gitlog"
     local repository_dir="$work_dir/project_repos/$project_name.git"
     local issues_file="$work_dir/issues.txt"
-    local commit_db_file="$work_dir/framework/projects/$project_id/commit-db"
+    local commit_db_file="$work_dir/framework/projects/$project_id/$BUGS_CSV_ACTIVE"
 
     git --git-dir=$repository_dir log --reverse > $git_log_file || die "Git log has failed"
 
@@ -127,7 +147,8 @@ test_crossref_commmit_issue() {
     popd > /dev/null 2>&1
 
     # Check whether expected files exist
-    [ -s "$commit_db_file" ] || die "$commit_db_file does not exist or it is empty"
+    [ -e "$commit_db_file" ] || die "$commit_db_file does not exist in $PWD"
+    [ -s "$commit_db_file" ] || die "$commit_db_file is empty in $PWD"
 
     # Does each row contain 5 values?
     while read -r row; do
@@ -151,11 +172,11 @@ test_initialize_revisions() {
     mkdir -p "$lib_dir"
 
     mkdir -p "$lib_dir/junit/junit/4.12"
-    wget -nv http://central.maven.org/maven2/junit/junit/4.12/junit-4.12.jar -O "$lib_dir/junit/junit/4.12/junit-4.12.jar" || die "Failed to download junit-4.12.jar"
+    (cd "$lib_dir/junit/junit/4.12" && download_url https://repo1.maven.org/maven2/junit/junit/4.12/junit-4.12.jar || die "Failed to download junit-4.12.jar")
     mkdir -p "$lib_dir/org/apache/commons/commons-lang3/3.4"
-    wget -nv http://central.maven.org/maven2/org/apache/commons/commons-lang3/3.4/commons-lang3-3.4.jar -O "$lib_dir/org/apache/commons/commons-lang3/3.4/commons-lang3-3.4.jar" || die "Failed to download commons-lang3-3.4.jar"
+    (cd "$lib_dir/org/apache/commons/commons-lang3/3.4" && download_url https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.4/commons-lang3-3.4.jar || die "Failed to download commons-lang3-3.4.jar")
     mkdir -p "$lib_dir/org/hamcrest/hamcrest-core/1.3"
-    wget -nv http://central.maven.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar -O "$lib_dir/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar" || die "Failed to download hamcrest-core-1.3.jar"
+    (cd "$lib_dir/org/hamcrest/hamcrest-core/1.3" && download_url https://repo1.maven.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar || die "Failed to download hamcrest-core-1.3.jar")
     # End of fix for Java-7
 
     pushd . > /dev/null 2>&1
@@ -170,7 +191,7 @@ test_initialize_revisions() {
     _check_output "$work_dir/$analyzer_output_dir/includes" "$RESOURCES_OUTPUT_DIR/$analyzer_output_dir/includes"
     _check_output "$work_dir/$analyzer_output_dir/info" "$RESOURCES_OUTPUT_DIR/$analyzer_output_dir/info"
 
-    local commit_db_file="$work_dir/framework/projects/$project_id/commit-db"
+    local commit_db_file="$work_dir/framework/projects/$project_id/$BUGS_CSV_ACTIVE"
     local rev_v1=$(grep "^$bug_id," "$commit_db_file" | cut -f2 -d',')
     local rev_v2=$(grep "^$bug_id," "$commit_db_file" | cut -f3 -d',')
     local rev_v1_build_dir="$work_dir/framework/projects/$project_id/build_files/$rev_v1"
@@ -187,7 +208,7 @@ test_initialize_revisions() {
     _check_output "$work_dir/$src_patch" "$RESOURCES_OUTPUT_DIR/$src_patch"
     _check_output "$work_dir/$test_patch" "$RESOURCES_OUTPUT_DIR/$test_patch"
 
-    local layout="framework/projects/$project_id/dir-layout.csv"
+    local layout="framework/projects/$project_id/$LAYOUT_FILE"
     _check_output "$work_dir/$layout" "$RESOURCES_OUTPUT_DIR/$layout"
 }
 
@@ -208,7 +229,7 @@ test_analyze_project() {
     ./analyze-project.pl -p $project_id -w $work_dir -g $issue_tracker_name -t $issue_tracker_project_id -b $bug_id || die "Analyze project script has failed"
     popd > /dev/null 2>&1
 
-    local commit_db_file="$work_dir/framework/projects/$project_id/commit-db"
+    local commit_db_file="$work_dir/framework/projects/$project_id/$BUGS_CSV_ACTIVE"
     local rev_v2=$(grep "^$bug_id," "$commit_db_file" | cut -f3 -d',')
     local failing_tests="framework/projects/$project_id/failing_tests/$rev_v2"
     [ -s "$work_dir/$failing_tests" ] || die "No failing test cases has been reported"
@@ -304,7 +325,7 @@ test_promote_to_db() {
 
     [ -d "$HERE/../projects/$project_id" ] || die "Project directory does not exist"
 
-    local commit_db_file="$work_dir/framework/projects/$project_id/commit-db"
+    local commit_db_file="$work_dir/framework/projects/$project_id/$BUGS_CSV_ACTIVE"
     local rev_v1=$(grep "^$bug_id," "$commit_db_file" | cut -f2 -d',')
     local rev_v2=$(grep "^$bug_id," "$commit_db_file" | cut -f3 -d',')
 
@@ -338,8 +359,9 @@ test_promote_to_db() {
     local project_build_xml="projects/$project_id/$project_id.build.xml"
     _check_output "$HERE/../$project_build_xml" "$work_dir/framework/$project_build_xml"
 
-    [ -s "$HERE/../projects/$project_id/commit-db" ] || die "Commit-db does not exit or it is empty"
-    [ -s "$HERE/../projects/$project_id/dir-layout.csv" ] || die "dir-layout.csv does not exit or it is empty"
+    [ -s "$HERE/../projects/$project_id/$BUGS_CSV_ACTIVE" ] || die "active-bugs csv does not exist or it is empty"
+    [ -s "$HERE/../projects/$project_id/$BUGS_CSV_DEPRECATED" ] || die "deprecated-bugs csv does not exist or it is missing the header"
+    [ -s "$HERE/../projects/$project_id/$LAYOUT_FILE" ] || die "$LAYOUT_FILE does not exist or it is empty"
 }
 
 #
@@ -362,7 +384,7 @@ WORK_DIR="$TMP_DIR/test_bug_mining"
 rm -rf "$WORK_DIR"
 
 # Project example
-PROJECT_ID="Codec"
+PROJECT_ID="TestCodec"
 PROJECT_NAME="commons-codec"
 REPOSITORY_URL="https://github.com/apache/commons-codec.git"
 ISSUE_TRACKER_NAME="jira"
@@ -374,8 +396,8 @@ test_download_issues "$WORK_DIR" "$ISSUE_TRACKER_NAME" "$ISSUE_TRACKER_PROJECT_I
 test_crossref_commmit_issue "$PROJECT_ID" "$PROJECT_NAME" "$WORK_DIR" "$BUG_FIX_REGEX" || die "Test 'test_crossref_commmit_issue' has failed!"
 
 ISSUE_ID="CODEC-231"
-grep -q ",$ISSUE_ID," "$WORK_DIR/framework/projects/$PROJECT_ID/commit-db" || die "$ISSUE_ID has not been mined"
-BUG_ID=$(grep ",$ISSUE_ID," "$WORK_DIR/framework/projects/$PROJECT_ID/commit-db" | cut -f1 -d',')
+grep -q ",$ISSUE_ID," "$WORK_DIR/framework/projects/$PROJECT_ID/$BUGS_CSV_ACTIVE" || die "$ISSUE_ID has not been mined"
+BUG_ID=$(grep ",$ISSUE_ID," "$WORK_DIR/framework/projects/$PROJECT_ID/$BUGS_CSV_ACTIVE" | cut -f1 -d',')
 
 test_initialize_revisions "$PROJECT_ID" "$WORK_DIR" "$BUG_ID" || die "Test 'test_initialize_revisions' has failed!"
 test_analyze_project "$PROJECT_ID" "$WORK_DIR" "$ISSUE_TRACKER_NAME" "$ISSUE_TRACKER_PROJECT_ID" "$BUG_ID" || die "Test 'test_analyze_project' has failed!"

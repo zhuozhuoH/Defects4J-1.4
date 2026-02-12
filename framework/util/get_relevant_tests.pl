@@ -26,9 +26,7 @@
 
 =head1 NAME
 
-get_relevant_tests.pl -- Determines for each version of a given project the set
-of relevant tests. The script fails on the first occurrence of an error on any
-project version.
+get_relevant_tests.pl -- determine the set of relevant tests for a set of bugs of a given project.
 
 =head1 SYNOPSIS
 
@@ -58,7 +56,13 @@ The default is F<relevant_tests> in Defects4J's project directory.
 
 =back
 
+=head1 DESCRIPTION
+
+Determines the set of relevant tests for each bug (or a particular bug) of a
+given project. The script stops as soon as an error occurs for any project version.
+
 =cut
+
 use warnings;
 use strict;
 
@@ -89,7 +93,7 @@ my $TMP_DIR = Utils::get_tmp_dir($cmd_opts{t});
 system("mkdir -p $TMP_DIR");
 my $project = Project::create_project($PID);
 $project->{prog_root} = $TMP_DIR;
-my $project_dir = "$PROJECTS_DIR/projects/$PID";
+my $project_dir = "$PROJECTS_DIR/$PID";
 my $out_dir = $cmd_opts{o} // "$project_dir/relevant_tests";
 
 my @ids;
@@ -97,7 +101,7 @@ if (defined $BID) {
     $BID =~ /^(\d+)$/ or die "Wrong bug_id format: $BID! Expected: \\d+";
     @ids = ($BID);
 } else {
-    @ids = $project->get_version_ids();
+    @ids = $project->get_bug_ids();
 }
 
 foreach my $id (@ids) {

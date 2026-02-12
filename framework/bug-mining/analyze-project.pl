@@ -26,11 +26,11 @@
 
 =head1 NAME
 
-analyze-project.pl -- Determine all suitable candidates listed in the commit-db.
+analyze-project.pl -- Determine all suitable candidates listed in the active-bugs csv.
 
 =head1 SYNOPSIS
 
-analyze-project.pl -p project_id -w work_dir -g tracker_name -t tracker_project_id [-b bug_id]
+analyze-project.pl -p project_id -w work_dir -g tracker_name -t tracker_project_id [-b bug_id] [-D]
 
 =head1 OPTIONS
 
@@ -57,13 +57,18 @@ commons-lang project is LANG.
 =item B<-b C<bug_id>>
 
 Only analyze this bug id. The bug_id has to follow the format B<(\d+)(:(\d+))?>.
-Per default all bug ids, listed in the commit-db, are considered.
+By default all bug ids, listed in the active-bugs csv, are considered.
+
+=item B<-D>
+
+Debug: Enable verbose logging and do not delete the temporary check-out directory
+(optional).
 
 =back
 
 =head1 DESCRIPTION
 
-Runs the following worflow for all candidate bugs in the project's C<commit-db>,
+Runs the following worflow for all candidate bugs in the project's C<active-bugs.csv>,
 or (if -b is specified) for a subset of candidates:
 
 =over 4
@@ -109,7 +114,7 @@ use DB;
 use Utils;
 
 my %cmd_opts;
-getopts('p:w:g:t:b:', \%cmd_opts) or pod2usage(1);
+getopts('p:w:g:t:b:D', \%cmd_opts) or pod2usage(1);
 
 pod2usage(1) unless defined $cmd_opts{p} and defined $cmd_opts{w}
                     and defined $cmd_opts{g} and defined $cmd_opts{t};
@@ -119,6 +124,7 @@ my $BID = $cmd_opts{b};
 my $WORK_DIR = abs_path($cmd_opts{w});
 my $TRACKER_ID = $cmd_opts{t};
 my $TRACKER_NAME = $cmd_opts{g};
+$DEBUG = 1 if defined $cmd_opts{D};
 
 # Check format of target version id
 if (defined $BID) {
@@ -160,7 +166,7 @@ my $dbh = DB::get_db_handle($TAB_REV_PAIRS, $db_dir);
 my @COLS = DB::get_tab_columns($TAB_REV_PAIRS) or die;
 
 # Figure out which IDs to run script for
-my @ids = $project->get_version_ids();
+my @ids = $project->get_bug_ids();
 if (defined $BID) {
     if ($BID =~ /(\d+):(\d+)/) {
         @ids = grep { ($1 <= $_) && ($_ <= $2) } @ids;
@@ -195,7 +201,7 @@ foreach my $bid (@ids) {
     _add_row(\%data);
 }
 $dbh->disconnect();
-system("rm -rf $TMP_DIR");
+system("rm -rf $TMP_DIR") unless $DEBUG;
 
 #
 # Check size of src diff, which is created by initialize-revisions.pl script,
@@ -263,7 +269,25 @@ sub _check_t2v2 {
 
         # Run t2 and get number of failing tests
         my $file = "$project->{prog_root}/v2.fail"; `>$file`;
+
         $project->run_tests($file) or die;
+
+        # Filter out invalid test names, such as testEncode[0].
+        # This problem impacts many Commons projects.
+        if(-e "$project->{prog_root}/v2.fail"){
+            rename("$project->{prog_root}/v2.fail", "$project->{prog_root}/v2.fail".'.bak');
+            open(IN, '<'."$project->{prog_root}/v2.fail".'.bak') or die $!;
+            open(OUT, '>'."$project->{prog_root}/v2.fail") or die $!;
+            while(<IN>) {
+                if($_ =~ /\-\-\-/){
+                    $_ =~ s/\[[0-9]\]//g;
+                }
+                print OUT $_;
+            }
+            close(IN);
+            close(OUT);
+        }
+	
         # Get number of failing tests
         my $list = Utils::get_failing_tests($file);
         my $fail = scalar(@{$list->{"classes"}}) + scalar(@{$list->{"methods"}});

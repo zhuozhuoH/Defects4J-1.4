@@ -136,7 +136,7 @@ my %SUPPORTED_VCSs = (
                                     next unless $commit; # skip lines before first commit info.
                                     if (my $bug_number = eval('$_ =~' . "$regexp" . '; $1')) {
                                         # skip bug ids that have not been reported in the issue tracker
-                                        next unless system("wget -q -O /dev/null \"https://sourceforge.net/p/$project_name/bugs/$bug_number\"") == 0;
+                                        next unless system("curl -s -S -L -o /dev/null \"https://sourceforge.net/p/$project_name/bugs/$bug_number\"") == 0;
                                         my $parent = $commit - 1;
                                         next unless $parent > 0; # skip first revision
                                         $results{$version_id}{'p'} = $parent;
@@ -188,7 +188,7 @@ close $fh;
 if (scalar keys %commits eq 0) {
     print("Warning, no commit that matches the regex expression provided has been found\n");
 }
-open $fh, ">$OUTPUT_FILE" or die "Cannot open ${OUTPUT_FILE}!";
+open $fh, ">>$OUTPUT_FILE" or die "Cannot open ${OUTPUT_FILE}!";
 for my $commit_id (sort { $a <=> $b} keys %commits) {
     my $row = $commits{$commit_id};
     print $fh "$commit_id,$row->{'p'},$row->{'c'},$row->{'issue_id'},$row->{'issue_url'}\n";

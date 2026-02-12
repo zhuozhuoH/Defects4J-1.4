@@ -40,8 +40,9 @@ metadata:
   - framework/projects/<PROJECT_ID>/trigger_tests
   - framework/projects/<PROJECT_ID>/build.xml.patch
   - framework/projects/<PROJECT_ID>/<PROJECT_ID>.build.xml
-  - framework/projects/<PROJECT_ID>/commit-db
-  - framework/projects/<PROJECT_ID>/dir-layout.csv
+  - framework/projects/<PROJECT_ID>/$BUGS_CSV_ACTIVE
+  - framework/projects/<PROJECT_ID>/$BUGS_CSV_DEPRECATED	
+  - framework/projects/<PROJECT_ID>/$LAYOUT_FILE
   - project_repos/<PROJECT_NAME>.git
 and updates the project_repos/README file with information of when the project
 repository was cloned.
@@ -61,7 +62,7 @@ The id of the project for which the revision pairs are to be promoted.
 =item B<-b C<bug_id>>
 
 Only analyze this bug id. The bug_id has to follow the format B<(\d+)(:(\d+))?>.
-Per default all bug ids, listed in the commit-db, are considered.
+Per default all bug ids, listed in the $BUGS_CSV_ACTIVE, are considered.
 
 =item B<-w C<work_dir>>
 
@@ -125,8 +126,8 @@ my @id_specific_files = ("loaded_classes/<id>.src", "loaded_classes/<id>.test",
                             "modified_classes/<id>.src", "modified_classes/<id>.test",
                             "patches/<id>.src.patch", "patches/<id>.test.patch",
                             "trigger_tests/<id>", "relevant_tests/<id>");
-my @generic_files_and_directories = ("dependent_tests", "build.xml.patch", "${PID}.build.xml",
-                                     "dir-layout.csv", "lib");
+my @generic_files_and_directories_to_replace = ("build.xml.patch", "${PID}.build.xml", "lib", $BUGS_CSV_DEPRECATED);
+my @generic_files_to_append = ("dependent_tests", $LAYOUT_FILE);
 
 my @ids = _get_bug_ids($BID);
 foreach my $id (@ids) {
@@ -140,10 +141,11 @@ foreach my $id (@ids) {
 
     # find number
     my $max_number = 0;
-    my $output_commit_db = "$OUTPUT_DIR/$PID/commit-db";
+    my $output_commit_db = "$OUTPUT_DIR/$PID/$BUGS_CSV_ACTIVE";
     if (-e $output_commit_db) {
-        open FH, $output_commit_db or die "could not open output commit-db";
+        open FH, $output_commit_db or die "could not open output active-bugs csv";
         my $exists_line = 0;
+        my $header = <FH>;
         while (my $line = <FH>) {
             chomp $line;
             $line =~ /^(\d+),(.*),(.*),(.*),(.*)$/ or die "could not parse line";
@@ -162,7 +164,13 @@ foreach my $id (@ids) {
     ++$max_number;
     print "\t... adding as new commit-id $max_number\n";
 
-    open FH, ">>$output_commit_db" or die "could not open output commit-db for writing";
+    open FH, ">>$output_commit_db" or die "could not open output active-bugs csv for writing";
+
+    # If this is the first bug to be promoted, print the header to the active-bugs csv file.
+    if ($max_number == 1) {
+        print FH $BUGS_CSV_BUGID.",".$BUGS_CSV_COMMIT_BUGGY.",".$BUGS_CSV_COMMIT_FIXED.",".$BUGS_CSV_ISSUE_ID.",".$BUGS_CSV_ISSUE_URL."\n";
+    }
+
     print FH "$max_number,$v1,$v2,$issue_id,$issue_url\n";
     close FH;
     for my $rev ($v1, $v2) {
@@ -171,7 +179,7 @@ foreach my $id (@ids) {
             $fn_rev =~ s/<rev>/$rev/;
             my $src = "$PROJECTS_DIR/$PID/$fn_rev";
             my $dst = "$OUTPUT_DIR/$PID/$fn_rev";
-            _cp($src, $dst);
+            _copy($src, $dst);
         }
     }
     for my $fn (@id_specific_files) {
@@ -181,26 +189,32 @@ foreach my $id (@ids) {
         $fn_dst =~ s/<id>/$max_number/;
         my $src = "$PROJECTS_DIR/$PID/$fn_src";
         my $dst = "$OUTPUT_DIR/$PID/$fn_dst";
-        _cp($src, $dst);
+        _copy($src, $dst);
     }
 }
 
-for my $fn (@generic_files_and_directories) {
+for my $fn (@generic_files_and_directories_to_replace) {
     my $src = "$PROJECTS_DIR/$PID/$fn";
     my $dst = "$OUTPUT_DIR/$PID/$fn";
-    _cp($src, $dst);
+    _copy($src, $dst);
+}
+
+for my $fn (@generic_files_to_append) {
+    my $src = "$PROJECTS_DIR/$PID/$fn";
+    my $dst = "$OUTPUT_DIR/$PID/$fn";
+    _append($src, $dst);
 }
 
 # Copy project submodule
 my $src = "$WORK_DIR/framework/core/Project/${PID}.pm";
 my $dst = "$CORE_DIR/Project/${PID}.pm";
-_cp($src, $dst);
+_copy($src, $dst);
 
 # Copy repository directory
 my $dir_name = $REPOSITORY_DIR;
 $dir_name =~ m[^.*/(.*)$];
 system ("rm -rf $REPO_DIR/$1") == 0 or die "Could not remove $REPO_DIR/$1: $!";
-_cp($REPOSITORY_DIR, $REPO_DIR);
+_copy($REPOSITORY_DIR, $REPO_DIR);
 
 # Update README file
 my $bug_miniming_repos_readme_file = "$WORK_DIR/project_repos/README";
@@ -249,7 +263,7 @@ sub _get_bug_ids {
     return @ids;
 }
 
-sub _cp {
+sub _copy {
     my ($src, $dst) = @_;
     print "\t... copying $src -> $dst\n";
     $dst =~ m[^(.*)/.*$];
@@ -260,17 +274,41 @@ sub _cp {
     }
 }
 
-sub _db_cp {
-    my ($db_in, $db_out, $tab, $id, $new_id) = @_;
-    my $stmnt = $db_in->prepare("SELECT * FROM $tab WHERE $PROJECT=? AND $ID=?")
-        or die $db_in->errstr;
-    $stmnt->execute($PID, $id);
-    my @vals = $stmnt->fetchrow_array;
-    $stmnt->finish();
-    $vals[1] = $new_id;
-    for (my $i=0; $i < scalar(@vals); $i++) {
-        $vals[$i] = "'" . $vals[$i] . "'";
+sub _append {
+    my ($src, $dst) = @_;
+    print "\t... appending $src -> $dst\n";
+    $dst =~ m[^(.*)/.*$];
+
+    system ("mkdir -p $1") == 0 or die "could not mkdir dest $1: $!";
+    if (-e $dst and -e $src) {
+        open(SRC_FILE, '<', $src) or die "Cannot open src file ($src): $!";
+        my @src_lines = <SRC_FILE>;
+        close SRC_FILE;
+        open(DST_FILE, '<', $dst) or die "Cannot open dst file ($dst): $!";
+        my @dst_lines = <DST_FILE>;
+        close DST_FILE;
+
+        # Identify new lines to add to the file (do not re-append existing entries)
+        my @new_lines = ();
+        my %seen = ();
+        foreach my $item (@dst_lines) {
+            $seen{$item}++;
+        }
+
+        foreach my $item (@src_lines) {
+            push(@new_lines, $item) unless $seen{$item}++;
+        }
+
+        open(my $DST_FILE, '>>', $dst) or die "Cannot open dst file ($dst)' $!"; 
+        foreach my $line (@new_lines) {
+            print $DST_FILE $line; 
+        }
+        close $DST_FILE;
+
+        print "\t... OK\n";
+    } elsif (-e $src) {
+        system("cat $src >> $dst") == 0 or die "could not append $src: $!";
+        print "\t... OK\n";
+
     }
-    my $row = join(',', @vals);
-    $db_out->do("INSERT INTO $tab VALUES ($row)") or die $db_out->errstr;
 }

@@ -28,19 +28,11 @@
 
 get_gradle_dependencies.pl -- obtain a list of all gradle versions used in the
 entire history of a particular project and collect all gradle dependencies
-required to compile all bugs of the provided project.
+required to compile all bugs of that project.
 
 =head1 SYNOPSIS
 
   get_gradle_dependencies.pl -p project_id
-
-=head1 DESCRIPTION
-
-Extract all references to gradle distributions from the project's version
-control history and collect all gradle dependencies required to compile all bugs
-of the provided project.
-
-B<TODO: This script currently expects the repository to be a git repository!>
 
 =head1 OPTIONS
 
@@ -53,7 +45,16 @@ all gradle dependencies are collected.
 
 =back
 
+=head1 DESCRIPTION
+
+Extracts all references to gradle distributions from the project's version
+control history and collects all gradle dependencies required to compile all
+bugs that project.
+
+B<TODO: This script currently only works for git repositories!>
+
 =cut
+
 use warnings;
 use strict;
 
@@ -135,7 +136,7 @@ if (-e "$GRADLE_DEPS_ZIP") {
 
 system("echo \"Gradle dependencies updated: ${month}/${year}\\n\" > $GRADLE_DEPS_README");
 
-my @ids = $project->get_version_ids();
+my @ids = $project->get_bug_ids();
 foreach my $bid (@ids) {
     # Checkout a project version
     my $vid = "${bid}f";

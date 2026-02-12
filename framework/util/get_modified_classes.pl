@@ -26,8 +26,7 @@
 
 =head1 NAME
 
-get_modified_classes.pl -- Determine the set of classes modified by the patch of a given
-defect.
+get_modified_classes.pl -- determine the set of classes modified by the src patch.
 
 =head1 SYNOPSIS
 
@@ -51,6 +50,11 @@ Write output to this file (optional). By default the script prints the modified 
 stdout. Note that all diagnostic messages are sent to stderr.
 
 =back
+
+=head1 DESCRIPTION
+
+Determines the set of classes modified by the src patch.
+This script use diffstat, which is part of the patchutils library.
 
 =cut
 
@@ -97,10 +101,12 @@ $classes =~ s/$src_dir\/?//g;
 $classes =~ s/\.java//g;
 $classes =~ s/\//\./g;
 
+my @sorted_classes = sort { "\L$a" cmp "\L$b" } $classes;
+
 if (defined $OUT_FILE) {
     open(OUT, ">$OUT_FILE") or die "Cannot write output file";
-        print(OUT $classes);
+        print(OUT @sorted_classes);
     close(OUT);
 } else {
-    print($classes);
+    print(@sorted_classes);
 }

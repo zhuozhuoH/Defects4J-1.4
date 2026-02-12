@@ -31,7 +31,7 @@ classes, relevant tests) for each reproducible bug.
 
 =head1 SYNOPSIS
 
-get-class-list.pl -p project_id -w work_dir [-b bug_id]
+get-metadata.pl -p project_id -w work_dir [-b bug_id]
 
 =head1 OPTIONS
 
@@ -48,7 +48,7 @@ The working directory used for the bug-mining process.
 =item B<-b C<bug_id>>
 
 Only analyze this bug id. The bug_id has to follow the format B<(\d+)(:(\d+))?>.
-Per default all bug ids, listed in the commit-db, are considered.
+Per default all bug ids, listed in the active-bugs csv, are considered.
 
 =back
 
@@ -184,7 +184,7 @@ foreach my $bid (@bids) {
 
         # Get number of failing tests -> has to be 0
         my $fail = Utils::get_failing_tests($log_file);
-        (scalar(@{$fail->{classes}}) + scalar(@{$fail->{methods}})) == 0 or die;
+        (scalar(@{$fail->{classes}}) + scalar(@{$fail->{methods}})) == 0 or die "Unexpected failing test on fixed project version (see $log_file)!";
 
         # Run tests again and monitor class loader
         my $loaded = $project->monitor_test($test, "${bid}f");
@@ -200,14 +200,14 @@ foreach my $bid (@bids) {
 
     # Write list of loaded classes
     open(OUT, ">$LOADED/$bid.src") or die "Cannot write loaded classes!";
-    foreach (keys %src) {
+    foreach (sort { "\L$a" cmp "\L$b" } keys %src) {
         print OUT "$_\n";
     }
     close(OUT);
 
     # Write list of loaded test classes
     open(OUT, ">$LOADED/$bid.test") or die "Cannot write loaded test classes!";
-    foreach (keys %test) {
+    foreach (sort { "\L$a" cmp "\L$b" } keys %test) {
         print OUT "$_\n";
     }
     close(OUT);
@@ -248,27 +248,34 @@ sub _get_bug_ids {
         $max_id = $3 if defined $3;
     }
 
-    # Connect to database
-    my $dbh = DB::get_db_handle($TAB_TRIGGER, $db_dir);
-
-    # Select all version ids with reviewed src patch and verified triggering test
-    my $sth = $dbh->prepare("SELECT $ID FROM $TAB_TRIGGER " .
-                                "WHERE $FAIL_ISO_V1>0 AND $PROJECT=?")
-                            or die $dbh->errstr;
-    $sth->execute($PID) or die "Cannot query database: $dbh->errstr";
     my @ids = ();
-    foreach (@{$sth->fetchall_arrayref}) {
-        my $bid = $_->[0];
 
-        # Filter ids if necessary
-        next if (defined $min_id && ($bid<$min_id || $bid>$max_id));
+    if (-e "$db_dir/$TAB_TRIGGER") {
+        # Connect to database
+        my $dbh = DB::get_db_handle($TAB_TRIGGER, $db_dir);
 
-        # Add id to result array
-        push(@ids, $bid);
+        # Select all version ids with reviewed src patch and verified triggering test
+        my $sth = $dbh->prepare("SELECT $ID FROM $TAB_TRIGGER " .
+                                    "WHERE $FAIL_ISO_V1>0 AND $PROJECT=?")
+                                or die $dbh->errstr;
+        $sth->execute($PID) or die "Cannot query database: $dbh->errstr";
+
+        foreach (@{$sth->fetchall_arrayref}) {
+            my $bid = $_->[0];
+
+            # Filter ids if necessary
+            next if (defined $min_id && ($bid<$min_id || $bid>$max_id));
+
+            # Add id to result array
+            push(@ids, $bid);
+        }
+        $sth->finish();
+        $dbh->disconnect();
+    } elsif (defined $min_id && defined $max_id) {
+        @ids = ($min_id .. $max_id);
     }
-    $sth->finish();
-    $dbh->disconnect();
 
+    scalar(@ids) > 0 or die "No bug ids are suitable to run ./get-metadata.pl on";
     return @ids;
 }
 

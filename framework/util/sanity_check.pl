@@ -32,10 +32,6 @@ sanity_check.pl -- perform sanity check for a project or project version.
 
   sanity_check.pl -p project_id [-b bug_id] [-t tmp_dir]
 
-=head1 DESCRIPTION
-
-Checks out each project version, and runs the sanity check on it. Dies if any run fails.
-
 =head1 OPTIONS
 
 =over 4
@@ -56,7 +52,13 @@ The default is F</tmp>.
 
 =back
 
+=head1 DESCRIPTION
+
+Checks out each project version, and runs the sanity check on it.
+This script stops as soon as an error occurs.
+
 =cut
+
 use warnings;
 use strict;
 
@@ -92,7 +94,7 @@ if (defined $BID) {
     $BID =~ /^(\d+)$/ or die "Wrong bug_id format: $BID! Expected: \\d+";
     @ids = ($BID);
 } else {
-    @ids = $project->get_version_ids();
+    @ids = $project->get_bug_ids();
 }
 
 foreach my $bid (@ids) {

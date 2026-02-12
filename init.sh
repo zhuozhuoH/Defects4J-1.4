@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 #
+# Exit the shell script immediately if any of the subsequent commands fails.
+# immediately
+set -e
+#
 ################################################################################
 # This script initializes Defects4J. In particular, it downloads and sets up:
 # - the project's version control repositories
@@ -7,34 +11,103 @@
 # - the supported test generation tools
 # - the supported code coverage tools (TODO)
 ################################################################################
+
+# Print an error message and terminate the script.
+# Takes one argument, a custom error message.
+# Prints the supplied error message and a script termination notice to stderr.
+# Terminates the script with exit code 1.
+print_error_and_exit() {
+  echo -e "${1} \nTerminating initialization... " >&2
+  exit 1
+}
+
 # TODO: Major and the coverage tools should be moved to framework/lib
 
-# Check whether wget is available
-if ! wget --version > /dev/null 2>&1; then
-    echo "Couldn't find wget to download dependencies. Please install wget and re-run this script."
-    exit 1
+# Check whether wget is available on OSX
+if [ "$(uname)" = "Darwin" ] ; then
+    if ! wget --version > /dev/null 2>&1; then
+        print_error_and_exit "Couldn't find wget to download dependencies. Please install wget and re-run this script."
+    fi
 fi
 
+# Check whether curl is available
+if ! curl --version > /dev/null 2>&1; then
+    print_error_and_exit "Couldn't find curl to download dependencies. Please install curl and re-run this script."
+fi
+
+# Check whether unzip is available
+if ! unzip -v > /dev/null 2>&1; then
+    print_error_and_exit "Couldn't find unzip to extract dependencies. Please install unzip and re-run this script."
+fi
+################################################################################
+HOST_URL="https://defects4j.org/downloads"
+
 # Directories for project repositories and external libraries
-BASE="$(cd $(dirname $0); pwd)"
+BASE="$(cd "$(dirname "$0")"; pwd)"
 DIR_REPOS="$BASE/project_repos"
 DIR_LIB_GEN="$BASE/framework/lib/test_generation/generation"
 DIR_LIB_RT="$BASE/framework/lib/test_generation/runtime"
 DIR_LIB_GRADLE="$BASE/framework/lib/build_systems/gradle"
 mkdir -p "$DIR_LIB_GEN" && mkdir -p "$DIR_LIB_RT" && mkdir -p "$DIR_LIB_GRADLE"
 
-
 ################################################################################
 #
 # Utility functions
 #
 
+# MacOS does not install the timeout command by default.
+if [ "$(uname)" = "Darwin" ] ; then
+  function timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+fi
+
+# Download the remote resource to a local file of the same name.
+# Takes a single argument, a URL.
+# Skips the download if the remote resource is newer.
+# Works around connections that hang.
+download_url() {
+    if [ "$#" -ne 1 ]; then
+        echo "Illegal number of arguments"
+    fi
+    URL=$1
+    echo "Downloading ${URL}"
+    if [ "$(uname)" = "Darwin" ] ; then
+        wget -nv -N "$URL" || print_error_and_exit "Could not download $URL"
+        echo "Downloaded $URL"
+    else
+        BASENAME="$(basename "$URL")"
+        if [ -f "$BASENAME" ]; then
+            ZBASENAME="-z $BASENAME"
+        else
+            ZBASENAME=""
+        fi
+        (timeout 300 curl -s -S -R -L -O $ZBASENAME "$URL" || (echo "retrying curl $URL" && rm -f "$BASENAME" && curl -R -L -O "$URL")) && echo "Downloaded $URL"
+    fi
+}
+
+# Download the remote resource and unzip it.
+# Takes a single argument, a URL.
+# Skips the download if the local file of the same name is newer.
+# Works around connections that hang and corrupted downloads.
+download_url_and_unzip() {
+    if [ "$#" -ne 1 ]; then
+        echo "Illegal number of arguments"
+    fi
+    URL=$1
+    BASENAME="$(basename "$URL")"
+    download_url "$URL"
+    if ! unzip -o "$BASENAME" > /dev/null ; then
+        echo "retrying download and unzip"
+        rm -rf "$BASENAME"
+        download_url "$URL"
+        unzip -o "$BASENAME"
+    fi
+}
+
 # Get time of last data modification of a file
 get_modification_timestamp() {
     local USAGE="Usage: get_modification_timestamp <file>"
     if [ "$#" != 1 ]; then
-        echo "$USAGE" >&2
-        exit 1
+        print_error_and_exit "$USAGE"
     fi
 
     local f="$1"
@@ -52,7 +125,6 @@ get_modification_timestamp() {
     echo "$ts"
 }
 
-
 ################################################################################
 #
 # Download project repositories if necessary
@@ -66,11 +138,10 @@ cd "$DIR_REPOS" && ./get_repos.sh
 #
 echo
 echo "Setting up Major ... "
-MAJOR_VERSION="1.3.2"
+MAJOR_VERSION="1.3.4"
 MAJOR_URL="https://mutation-testing.org/downloads"
 MAJOR_ZIP="major-${MAJOR_VERSION}_jre7.zip"
-cd "$BASE" && wget -nv -N "$MAJOR_URL/$MAJOR_ZIP" \
-           && unzip -o "$MAJOR_ZIP" > /dev/null \
+cd "$BASE" && download_url_and_unzip "$MAJOR_URL/$MAJOR_ZIP" \
            && rm "$MAJOR_ZIP" \
            && cp major/bin/.ant major/bin/ant
 
@@ -80,18 +151,15 @@ cd "$BASE" && wget -nv -N "$MAJOR_URL/$MAJOR_ZIP" \
 #
 echo
 echo "Setting up EvoSuite ... "
-EVOSUITE_VERSION="0.2.0"
-# EVOSUITE_URL="http://people.cs.umass.edu/~rjust/defects4j/download"
-EVOSUITE_URL="http://www.evosuite.org/files"
+EVOSUITE_VERSION="1.1.0"
+EVOSUITE_URL="https://github.com/EvoSuite/evosuite/releases/download/v${EVOSUITE_VERSION}"
 EVOSUITE_JAR="evosuite-${EVOSUITE_VERSION}.jar"
 EVOSUITE_RT_JAR="evosuite-standalone-runtime-${EVOSUITE_VERSION}.jar"
-cd "$DIR_LIB_GEN" && [ ! -f "$EVOSUITE_JAR" ] \
-                  && wget -nv "$EVOSUITE_URL/$EVOSUITE_JAR"
-cd "$DIR_LIB_RT"  && [ ! -f "$EVOSUITE_RT_JAR" ] \
-                  && wget -nv "$EVOSUITE_URL/$EVOSUITE_RT_JAR"
+cd "$DIR_LIB_GEN" && download_url "$EVOSUITE_URL/$EVOSUITE_JAR"
+cd "$DIR_LIB_RT"  && download_url "$EVOSUITE_URL/$EVOSUITE_RT_JAR"
 # Set symlinks for the supported version of EvoSuite
-ln -sf "$DIR_LIB_GEN/$EVOSUITE_JAR" "$DIR_LIB_GEN/evosuite-current.jar"
-ln -sf "$DIR_LIB_RT/$EVOSUITE_RT_JAR" "$DIR_LIB_RT/evosuite-rt.jar"
+(cd "$DIR_LIB_GEN" && ln -sf "$EVOSUITE_JAR" "evosuite-current.jar")
+(cd "$DIR_LIB_RT" && ln -sf "$EVOSUITE_RT_JAR" "evosuite-rt.jar")
 
 ################################################################################
 #
@@ -99,14 +167,17 @@ ln -sf "$DIR_LIB_RT/$EVOSUITE_RT_JAR" "$DIR_LIB_RT/evosuite-rt.jar"
 #
 echo
 echo "Setting up Randoop ... "
-RANDOOP_VERSION="3.1.5"
+RANDOOP_VERSION="4.2.5"
 RANDOOP_URL="https://github.com/randoop/randoop/releases/download/v${RANDOOP_VERSION}"
+RANDOOP_ZIP="randoop-${RANDOOP_VERSION}.zip"
 RANDOOP_JAR="randoop-all-${RANDOOP_VERSION}.jar"
-cd "$DIR_LIB_GEN" && [ ! -f "$RANDOOP_JAR" ] \
-                  && wget -nv "$RANDOOP_URL/$RANDOOP_JAR"
+REPLACECALL_JAR="replacecall-${RANDOOP_VERSION}.jar"
+COVEREDCLASS_JAR="covered-class-${RANDOOP_VERSION}.jar"
+(cd "$DIR_LIB_GEN" && download_url_and_unzip "$RANDOOP_URL/$RANDOOP_ZIP")
 # Set symlink for the supported version of Randoop
-ln -sf "$DIR_LIB_GEN/$RANDOOP_JAR" "$DIR_LIB_GEN/randoop-current.jar"
-
+(cd "$DIR_LIB_GEN" && ln -sf "randoop-${RANDOOP_VERSION}/$RANDOOP_JAR" "randoop-current.jar")
+(cd "$DIR_LIB_GEN" && ln -sf "randoop-${RANDOOP_VERSION}/$REPLACECALL_JAR" "replacecall-current.jar")
+(cd "$DIR_LIB_GEN" && ln -sf "randoop-${RANDOOP_VERSION}/$COVEREDCLASS_JAR" "covered-class-current.jar")
 
 ################################################################################
 #
@@ -131,8 +202,8 @@ if [ -e $GRADLE_DEPS_ZIP ]; then
 fi
 
 # Only download archive if the server has a newer file
-wget -N https://defects4j.org/downloads/$GRADLE_DISTS_ZIP
-wget -N https://defects4j.org/downloads/$GRADLE_DEPS_ZIP
+download_url $HOST_URL/$GRADLE_DISTS_ZIP
+download_url $HOST_URL/$GRADLE_DEPS_ZIP
 new_dists_ts=$(get_modification_timestamp $GRADLE_DISTS_ZIP)
 new_deps_ts=$(get_modification_timestamp $GRADLE_DEPS_ZIP)
 
@@ -150,9 +221,12 @@ echo
 echo "Setting up utility programs ... "
 
 BUILD_ANALYZER_VERSION="0.0.1"
-BUILD_ANALYZER_URL="https://github.com/jose/build-analyzer/releases/download/v$BUILD_ANALYZER_VERSION/build-analyzer-$BUILD_ANALYZER_VERSION.jar"
-BUILD_ANALYZER_JAR="analyzer.jar"
-cd "$BASE/framework/lib" && wget -nv "$BUILD_ANALYZER_URL" -O "$BUILD_ANALYZER_JAR"
+BUILD_ANALYZER_JAR=build-analyzer-$BUILD_ANALYZER_VERSION.jar
+BUILD_ANALYZER_URL="https://github.com/jose/build-analyzer/releases/download/v$BUILD_ANALYZER_VERSION/$BUILD_ANALYZER_JAR"
+BUILD_ANALYZER_JAR_LOCAL="analyzer.jar"
+cd "$BASE/framework/lib" && download_url "$BUILD_ANALYZER_URL"
+rm -f "$BUILD_ANALYZER_JAR_LOCAL"
+ln -s "$BUILD_ANALYZER_JAR" "$BUILD_ANALYZER_JAR_LOCAL"
 
 echo
 echo "Defects4J successfully initialized."
